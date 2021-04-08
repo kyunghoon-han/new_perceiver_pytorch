@@ -54,6 +54,7 @@ class Perceiver(nn.Module):
             #x = self.att_to_trans[i](x)
             x = self.transformer(x)
             x = self.connector_blocks[i](x)
-        x = self.relu(self.last_fc(x))
+        x = self.last_fc(x)
+        x = F.log_softmax(x, dim=2)
         return x
 
