@@ -6,12 +6,6 @@ import math, random
 from transformer import Transformer, device_assigner
 from transformer import self_attention_block as SA_block
 
-def list_pblocks(depth):
-    list_out = []
-    for a in range(depth):
-        list_out.append(perceiver_block(...))
-    return list_out
-
 class Perceiver(nn.Module):
     def __init__(self,
                  embed,
