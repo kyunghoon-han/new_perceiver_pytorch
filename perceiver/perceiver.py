@@ -6,6 +6,12 @@ import math, random
 from transformer import Transformer, device_assigner
 from transformer import self_attention_block as SA_block
 
+def list_pblocks(depth):
+    list_out = []
+    for a in range(depth):
+        list_out.append(perceiver_block(...))
+    return list_out
+
 class Perceiver(nn.Module):
     def __init__(self,
                  embed,
@@ -39,6 +45,8 @@ class Perceiver(nn.Module):
         self.self_attention = SA_block(embed,heads=heads,
                              mask=mask)
         self.last_fc = nn.Linear(embed, self.nt)
+        self.first_run = True
+        self.hid = None
         for i in range(self.depth): 
             connector_block.append(fc_unit.to(device_assigner()))
             connector_block.append(relu.to(device_assigner()))
@@ -47,12 +55,14 @@ class Perceiver(nn.Module):
             self.connector_blocks.append(a_connector)
             connector_block = [] 
     def forward(self,x):
+        if self.first_run and self.hid is None:
+            self.first_run = False
+            self.hid = torch.randn(x.size()).to(device_assigner())
         x = self.embedding(x)
         for i in range(self.depth):
-            x = self.self_attention(x)
-            #x = x.view(-1,self.embed*self.nt)
-            #x = self.att_to_trans[i](x)
-            x = self.transformer(x)
+            if self.hid is not None:
+                x, self.hid = self.self_attention(x,self.hid)
+                x, self.hid = self.transformer(x,self.hid)
             x = self.connector_blocks[i](x)
         x = self.last_fc(x)
         x = F.log_softmax(x, dim=2)
