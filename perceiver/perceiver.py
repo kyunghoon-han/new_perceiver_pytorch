@@ -58,6 +58,7 @@ class Perceiver(nn.Module):
                 x, self.hid = self.self_attention(x,self.hid)
                 x, self.hid = self.transformer(x,self.hid)
             x = self.connector_blocks[i](x)
+            x = F.log_softmax(x, dim=2)
         x = self.last_fc(x)
         x = F.log_softmax(x, dim=2)
         return x
