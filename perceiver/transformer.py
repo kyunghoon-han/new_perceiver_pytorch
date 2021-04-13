@@ -100,6 +100,84 @@ class self_attention_block(nn.Module):
         # output the result
         return output, hid
 
+class cross_attention_block(nn.Module):
+    def __init__(self, embed, heads=8,mask=False,hidden=None):
+        """
+           an attention block 
+        """
+        super().__init__()
+        self.keys = nn.Linear(embed, embed * heads, bias=False)
+        self.queries = nn.Linear(embed, embed * heads, bias=False)
+        self.values = nn.Linear(embed, embed * heads, bias=False)
+        
+        self.embed = embed
+        self.heads = heads
+        self.mask = mask
+
+        self.final_layer = nn.Linear(embed * heads, embed)
+
+    def forward(self, x,hid=None):
+        width, breadth, height = x.size()
+        # height is the embedding dimension
+        # this embedding dimension must match the layer size
+        assert height == self.embed
+        heads = self.heads
+        # get the keys, queries and values
+        key_vals = self.keys(x).view(
+                    width, breadth, heads, height)
+        if hid is not None:
+            if hid.size() == (width,breadth,height):
+                query_vals = self.queries(hid)
+            elif hid.size() == (width, breadth, heads, height):
+                query_vals = self.queries(torch.sum(hid,dim=2))
+            # add the hidden state if required
+            # by the perceiver
+            else :
+                hid = torch.randn(
+                        (width, breadth, 
+                         heads,height)).to(device_assigner())
+                query_vals = hid
+        else:
+            query_vals =self.queries(x).view(
+                            width, breadth, heads, height)
+        value_vals = self.values(x).view(
+                    width, breadth, heads, height)
+        # step 1: heads are now incorporated in batches
+        #         batch_size = width above * # heads
+        key_vals = batch_incorporation(key_vals)
+        if query_vals.size() == (width, breadth, heads, height):
+            query_vals = batch_incorporation(query_vals)
+        elif query_vals.size() == (width,breadth, height):
+            pass
+        value_vals = batch_incorporation(value_vals)
+        # step 2: rescale the queries and the keys
+        query_vals = query_vals / (height ** (1/4))
+        key_vals = key_vals / (height ** (1/4))
+        # step 3: dot product b/w the queries and the keys
+        query_vals = query_vals.view(key_vals.size())
+        q_and_k = torch.bmm(query_vals, key_vals.transpose(1,2))
+        # the size of q_and_k must satisfy the following
+        assert q_and_k.size() == (width * heads, breadth, breadth)
+
+        # step 3.5: if mask==True, apply the mask
+        if self.mask:
+            q_and_k = masker(q_and_k, mask_diag=False)
+        # step 4 : apply the softmax function
+        q_and_k = F.softmax(q_and_k, dim=2)
+        
+        # step 5 : apply the self-attention
+        att_output = torch.bmm(q_and_k, value_vals)
+        att_output = att_output.view(width, heads, breadth, height)
+        
+        # step 6 : combine the results 
+        output = att_output.transpose(1,2)
+        output = output.contiguous()
+        output = output.view(width, breadth, heads*height)
+        output = self.final_layer(output)
+
+        # output the result
+        return output, hid
+
 class T_block(nn.Module):
     """
         A transformer block

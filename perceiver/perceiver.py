@@ -4,7 +4,13 @@ import torch.nn.functional as F
 import math, random
 # import the transformer and attention blocks
 from transformer import Transformer, device_assigner
-from transformer import self_attention_block as SA_block
+from transformer import cross_attention_block as CA_block
+
+def list_pblocks(depth):
+    list_out = []
+    for a in range(depth):
+        list_out.append(perceiver_block(...))
+    return list_out
 
 class Perceiver(nn.Module):
     def __init__(self,
@@ -36,7 +42,7 @@ class Perceiver(nn.Module):
                                 seq_length=sequence_len,
                                 num_tokens=num_tokens,
                                 no_embedding=True)
-        self.self_attention = SA_block(embed,heads=heads,
+        self.cross_attention = CA_block(embed,heads=heads,
                              mask=mask)
         self.last_fc = nn.Linear(embed, self.nt)
         self.first_run = True
@@ -55,7 +61,7 @@ class Perceiver(nn.Module):
         x = self.embedding(x)
         for i in range(self.depth):
             if self.hid is not None:
-                x, self.hid = self.self_attention(x,self.hid)
+                x, self.hid = self.cross_attention(x,self.hid)
                 x, self.hid = self.transformer(x,self.hid)
             x = self.connector_blocks[i](x)
             x = F.log_softmax(x, dim=2)
