@@ -30,18 +30,19 @@ def masker(matrix, replace_val=0.0,
 
 
 class self_attention_block(nn.Module):
-    def __init__(self, embed, heads=8,mask=False,hidden=None):
+    def __init__(self, embed, bottleneck=50,heads=8,mask=False,hidden=None):
         """
            an attention block 
         """
         super().__init__()
         self.keys = nn.Linear(embed, embed * heads, bias=False)
-        self.queries = nn.Linear(embed, embed * heads, bias=False)
+        self.queries = nn.Linear(bottleneck, embed * heads, bias=False)
         self.values = nn.Linear(embed, embed * heads, bias=False)
         
         self.embed = embed
         self.heads = heads
         self.mask = mask
+        self.bs = bottleneck
 
         self.final_layer = nn.Linear(embed * heads, embed)
 
@@ -55,16 +56,18 @@ class self_attention_block(nn.Module):
         key_vals = self.keys(x).view(
                     width, breadth, heads, height)
         if hid is not None:
-            query_vals = self.queries(x).view(
-                            width, breadth,heads,height)
-            # add the hidden state if required
-            # by the perceiver
-            if not (hid.size()==query_vals.size()):
-                hid = torch.randn(query_vals.size()).to(device_assigner())
-            query_vals += hid
+            if hid.size()==(width,self.bs,self.heads,self.bs):
+                query_vals = self.queries(hid).view(
+                            width, self.bs,self.heads,self.embed)
+            elif hid.size() == (width,self.bs,self.heads,self.embed):
+                query_vals = hid
+            else:
+                hid = torch.randn(width,self.bs,heads,self.embed).to(device_assigner())
+                query_vals = hid
         else:
-            query_vals =self.queries(x).view(
-                            width, breadth, heads, height)
+            hid = torch.ones(width,self.bs,self.bs).to(device_assigner())
+            query_vals =self.queries(hid).view(
+                            width, self.bs, heads, self.embed)
         value_vals = self.values(x).view(
                     width, breadth, heads, height)
         # step 1: heads are now incorporated in batches
@@ -101,18 +104,20 @@ class self_attention_block(nn.Module):
         return output, hid
 
 class cross_attention_block(nn.Module):
-    def __init__(self, embed, heads=8,mask=False,hidden=None):
+    def __init__(self, embed, heads=8,bottleneck=50,
+                 mask=False,hidden=None):
         """
            an attention block 
         """
         super().__init__()
         self.keys = nn.Linear(embed, embed * heads, bias=False)
-        self.queries = nn.Linear(embed, embed * heads, bias=False)
+        self.queries = nn.Linear(bottleneck, embed * heads, bias=False)
         self.values = nn.Linear(embed, embed * heads, bias=False)
         
         self.embed = embed
         self.heads = heads
         self.mask = mask
+        self.bs = bottleneck
 
         self.final_layer = nn.Linear(embed * heads, embed)
 
@@ -126,16 +131,16 @@ class cross_attention_block(nn.Module):
         key_vals = self.keys(x).view(
                     width, breadth, heads, height)
         if hid is not None:
-            if hid.size() == (width,breadth,height):
+            if hid.size() == (width,self.bs,self.bs):
                 query_vals = self.queries(hid)
-            elif hid.size() == (width, breadth, heads, height):
-                query_vals = self.queries(torch.sum(hid,dim=2))
-            # add the hidden state if required
-            # by the perceiver
+                query_vals = query_vals.view(width,
+                                self.bs,heads,height)
+            elif hid.size() == (width, self.bs, heads, height):
+                query_vals = hid
             else :
                 hid = torch.randn(
-                        (width, breadth, 
-                         heads,height)).to(device_assigner())
+                        (width, self.bs, 
+                         heads,self.bs)).to(device_assigner())
                 query_vals = hid
         else:
             query_vals =self.queries(x).view(
@@ -154,10 +159,10 @@ class cross_attention_block(nn.Module):
         query_vals = query_vals / (height ** (1/4))
         key_vals = key_vals / (height ** (1/4))
         # step 3: dot product b/w the queries and the keys
-        query_vals = query_vals.view(key_vals.size())
+        query_vals = query_vals.view(width*heads,self.bs,self.embed)
         q_and_k = torch.bmm(query_vals, key_vals.transpose(1,2))
         # the size of q_and_k must satisfy the following
-        assert q_and_k.size() == (width * heads, breadth, breadth)
+        assert q_and_k.size() == (width*heads, self.bs, breadth)
 
         # step 3.5: if mask==True, apply the mask
         if self.mask:
@@ -167,12 +172,12 @@ class cross_attention_block(nn.Module):
         
         # step 5 : apply the self-attention
         att_output = torch.bmm(q_and_k, value_vals)
-        att_output = att_output.view(width, heads, breadth, height)
+        att_output = att_output.view(width, heads, self.bs, height)
         
         # step 6 : combine the results 
         output = att_output.transpose(1,2)
         output = output.contiguous()
-        output = output.view(width, breadth, heads*height)
+        output = output.view(width, self.bs, heads*height)
         output = self.final_layer(output)
 
         # output the result
@@ -183,11 +188,13 @@ class T_block(nn.Module):
         A transformer block
     """
     def __init__(self, embed, sequence_len,
+                 bottleneck=50,
                  mask=True, head=8, 
                  hidden_size=4, dropout=0.2,
                  hidden=None):
         super().__init__()
         self.attention = self_attention_block(embed, 
+                                         bottleneck=bottleneck,
                                          heads=head, 
                                          mask=mask,
                                          hidden=hidden)
@@ -223,6 +230,7 @@ class Transformer(nn.Module):
     """
     def __init__(self, emb_size, heads, depth,
                  seq_length, num_tokens, 
+                 bottleneck=50,
                  hidden=None,
                  no_embedding=False):
         super().__init__()

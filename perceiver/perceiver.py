@@ -17,6 +17,7 @@ class Perceiver(nn.Module):
                  embed,
                  num_tokens,
                  sequence_len,
+                 bottleneck_size=50,
                  mask=True,
                  heads=8, depth=3,
                  transformer_depth=2,
@@ -30,6 +31,7 @@ class Perceiver(nn.Module):
         fc_unit = nn.Linear(num_tokens, embed)
         relu = nn.ReLU()
         self.relu = relu
+        self.bs = bottleneck_size
         dout = nn.Dropout(dropout)
 
         self.embedding = nn.Embedding(embedding_dim=embed,
@@ -38,13 +40,16 @@ class Perceiver(nn.Module):
         self.transformer = Transformer(
                                 emb_size=embed,
                                 heads=heads,
+                                bottleneck=bottleneck_size,
                                 depth=transformer_depth,
                                 seq_length=sequence_len,
                                 num_tokens=num_tokens,
                                 no_embedding=True)
         self.cross_attention = CA_block(embed,heads=heads,
+                             bottleneck=bottleneck_size,
                              mask=mask)
         self.last_fc = nn.Linear(embed, self.nt)
+        self.to_one = nn.Linear(self.nt,1)
         self.first_run = True
         self.hid = None
         for i in range(self.depth): 
@@ -57,7 +62,9 @@ class Perceiver(nn.Module):
     def forward(self,x):
         if self.first_run and self.hid is None:
             self.first_run = False
-            self.hid = torch.randn(x.size()).to(device_assigner())
+            self.hid = torch.randn(x.size()[0],
+                                   self.bs,
+                                   self.bs,).to(device_assigner())
         x = self.embedding(x)
         for i in range(self.depth):
             if self.hid is not None:
@@ -66,6 +73,5 @@ class Perceiver(nn.Module):
             x = self.connector_blocks[i](x)
             x = F.log_softmax(x, dim=2)
         x = self.last_fc(x)
-        x = F.log_softmax(x, dim=2)
+        x = F.log_softmax(x,dim=2)
         return x
-
