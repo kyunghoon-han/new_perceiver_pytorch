@@ -29,243 +29,97 @@ def masker(matrix, replace_val=0.0,
     return matrix
 
 
-class self_attention_block(nn.Module):
-    def __init__(self, embed, bottleneck=50,heads=8,mask=False,hidden=None):
+class attention_block(nn.Module):
+    def __init__(self, kv_size, seq_length,query_size=100,
+                 heads=8,mask=False):
         """
            an attention block 
         """
         super().__init__()
-        self.keys = nn.Linear(embed, embed * heads, bias=False)
-        self.queries = nn.Linear(bottleneck, embed * heads, bias=False)
-        self.values = nn.Linear(embed, embed * heads, bias=False)
+        self.keys = nn.Linear(seq_length, 
+                        kv_size * heads, 
+                        bias=False).to(device_assigner())
+        self.queries = nn.Linear(query_size, 
+                        kv_size * heads, 
+                        bias=False).to(device_assigner())
+        self.values = nn.Linear(seq_length, 
+                        kv_size * heads, 
+                        bias=False).to(device_assigner())
         
-        self.embed = embed
+        self.kv = kv_size
         self.heads = heads
         self.mask = mask
-        self.bs = bottleneck
+        self.q = query_size
+        
+        self.final_layer = nn.Linear(kv_size * heads, query_size)
 
-        self.final_layer = nn.Linear(embed * heads, embed)
+    def forward(self, q,k,v):
+        v = v.to(torch.float)
+        k = self.keys(k)
+        v = self.values(v)
+        q = self.queries(q)
+        # rescale the queries and keys
+        q = q / (self.q**(1/4))
+        k = k / (self.kv**(1/4))
 
-    def forward(self, x,hid=None):
-        width, breadth, height = x.size()
-        # height is the embedding dimension
-        # this embedding dimension must match the layer size
-        assert height == self.embed
-        heads = self.heads
-        # get the keys, queries and values
-        key_vals = self.keys(x).view(
-                    width, breadth, heads, height)
-        if hid is not None:
-            if hid.size()==(width,self.bs,self.heads,self.bs):
-                query_vals = self.queries(hid).view(
-                            width, self.bs,self.heads,self.embed)
-            elif hid.size() == (width,self.bs,self.heads,self.embed):
-                query_vals = hid
-            else:
-                hid = torch.randn(width,self.bs,heads,self.embed).to(device_assigner())
-                query_vals = hid
-        else:
-            hid = torch.ones(width,self.bs,self.bs).to(device_assigner())
-            query_vals =self.queries(hid).view(
-                            width, self.bs, heads, self.embed)
-        value_vals = self.values(x).view(
-                    width, breadth, heads, height)
-        # step 1: heads are now incorporated in batches
-        #         batch_size = width above * # heads
-        key_vals = batch_incorporation(key_vals)
-        querals = batch_incorporation(query_vals)
-        value_vals = batch_incorporation(value_vals)
-        # step 2: rescale the queries and the keys
-        query_vals = query_vals / (height ** (1/4))
-        key_vals = key_vals / (height ** (1/4))
-        # step 3: dot product b/w the queries and the keys
-        query_vals = query_vals.view(key_vals.size())
-        q_and_k = torch.bmm(query_vals, key_vals.transpose(1,2))
-        # the size of q_and_k must satisfy the following
-        assert q_and_k.size() == (width * heads, breadth, breadth)
-
-        # step 3.5: if mask==True, apply the mask
+        # dot product b/w the queries and the keys
+        qk = torch.matmul(q,k.transpose(0,1))
+        qk = qk.view(qk.size()[0],-1,
+                     qk.size()[-1]) # channel_number = 1
+        # apply the mask
         if self.mask:
-            q_and_k = masker(q_and_k, mask_diag=False)
-        # step 4 : apply the softmax function
-        q_and_k = F.softmax(q_and_k, dim=2)
+            qk = masker(qk, mask_diag=False)
         
-        # step 5 : apply the self-attention
-        att_output = torch.bmm(q_and_k, value_vals)
-        att_output = att_output.view(width, heads, breadth, height)
-        
-        # step 6 : combine the results 
-        output = att_output.transpose(1,2)
-        output = output.contiguous()
-        output = output.view(width, breadth, heads*height)
-        output = self.final_layer(output)
+        # apply the softmax
+        qk = F.softmax(qk, dim=-1)
 
-        # output the result
-        return output, hid
+        # attention
+        #print(qk.size())
+        #print(v.size())
+        att_output = torch.matmul(qk, v)
+        #print(att_output.size())
+        #print(self.q * self.heads)
+        #exit()
+        return self.final_layer(att_output)
 
-class cross_attention_block(nn.Module):
-    def __init__(self, embed, heads=8,bottleneck=50,
-                 mask=False,hidden=None):
-        """
-           an attention block 
-        """
+class transformer_block(nn.Module):
+    """
+        transformer block
+    """
+    def __init__(self, query_size, kv_dim, 
+                 heads,sequence_length, 
+                 num_tokens,
+                 mask, no_embedding=False):
         super().__init__()
-        self.keys = nn.Linear(embed, embed * heads, bias=False)
-        self.queries = nn.Linear(bottleneck, embed * heads, bias=False)
-        self.values = nn.Linear(embed, embed * heads, bias=False)
-        
-        self.embed = embed
-        self.heads = heads
-        self.mask = mask
-        self.bs = bottleneck
-
-        self.final_layer = nn.Linear(embed * heads, embed)
-
-    def forward(self, x,hid=None):
-        width, breadth, height = x.size()
-        # height is the embedding dimension
-        # this embedding dimension must match the layer size
-        assert height == self.embed
-        heads = self.heads
-        # get the keys, queries and values
-        key_vals = self.keys(x).view(
-                    width, breadth, heads, height)
-        if hid is not None:
-            if hid.size() == (width,self.bs,self.bs):
-                query_vals = self.queries(hid)
-                query_vals = query_vals.view(width,
-                                self.bs,heads,height)
-            elif hid.size() == (width, self.bs, heads, height):
-                query_vals = hid
-            else :
-                hid = torch.randn(
-                        (width, self.bs, 
-                         heads,self.bs)).to(device_assigner())
-                query_vals = hid
+        self.sl = sequence_length
+        self.att = attention_block(kv_size=kv_dim,
+                                   seq_length=sequence_length,
+                                   query_size=query_size,
+                                   heads=heads,mask=mask)
+        self.no_emb = no_embedding
+        self.emb_token = nn.Embedding(embedding_dim=kv_dim,
+                                      num_embeddings=num_tokens)
+        self.emb_pos = nn.Embedding(embedding_dim=kv_dim,
+                                    num_embeddings=num_tokens)
+        self.dense_layer = nn.Linear(query_size,query_size)
+        self.k = kv_dim
+        self.q = query_size
+        self.s = sequence_length
+    def forward(self, q,k,v):
+        if self.no_emb:
+            tokens = k.type(torch.FloatTensor)
         else:
-            query_vals =self.queries(x).view(
-                            width, breadth, heads, height)
-        value_vals = self.values(x).view(
-                    width, breadth, heads, height)
-        # step 1: heads are now incorporated in batches
-        #         batch_size = width above * # heads
-        key_vals = batch_incorporation(key_vals)
-        if query_vals.size() == (width, breadth, heads, height):
-            query_vals = batch_incorporation(query_vals)
-        elif query_vals.size() == (width,breadth, height):
-            pass
-        value_vals = batch_incorporation(value_vals)
-        # step 2: rescale the queries and the keys
-        query_vals = query_vals / (height ** (1/4))
-        key_vals = key_vals / (height ** (1/4))
-        # step 3: dot product b/w the queries and the keys
-        query_vals = query_vals.view(width*heads,self.bs,self.embed)
-        q_and_k = torch.bmm(query_vals, key_vals.transpose(1,2))
-        # the size of q_and_k must satisfy the following
-        assert q_and_k.size() == (width*heads, self.bs, breadth)
-
-        # step 3.5: if mask==True, apply the mask
-        if self.mask:
-            q_and_k = masker(q_and_k, mask_diag=False)
-        # step 4 : apply the softmax function
-        q_and_k = F.softmax(q_and_k, dim=2)
-        
-        # step 5 : apply the self-attention
-        att_output = torch.bmm(q_and_k, value_vals)
-        att_output = att_output.view(width, heads, self.bs, height)
-        
-        # step 6 : combine the results 
-        output = att_output.transpose(1,2)
-        output = output.contiguous()
-        output = output.view(width, self.bs, heads*height)
-        output = self.final_layer(output)
-
-        # output the result
-        return output, hid
-
-class T_block(nn.Module):
-    """
-        A transformer block
-    """
-    def __init__(self, embed, sequence_len,
-                 bottleneck=50,
-                 mask=True, head=8, 
-                 hidden_size=4, dropout=0.2,
-                 hidden=None):
-        super().__init__()
-        self.attention = self_attention_block(embed, 
-                                         bottleneck=bottleneck,
-                                         heads=head, 
-                                         mask=mask,
-                                         hidden=hidden)
-        self.mask = mask
-        self.hidden = hidden
-        # apply the layer normalization
-        # y = \gamma*(x - E[x])/\sqrt(Var[x]+\epsilon)+\beta
-        self.normal_1 = nn.LayerNorm(embed)
-        self.normal_2 = nn.LayerNorm(embed)
-        # dropouts
-        self.drops = nn.Dropout(dropout)
-        # fully_connected layers
-        self.fc = nn.Sequential(
-                nn.Linear(embed, hidden_size * embed),
-                nn.ReLU(),
-                nn.Linear(hidden_size * embed, embed)
-        )
-    def forward(self, x):
-        attention, self.hidden = self.attention(x,self.hidden)
-        x = self.normal_1(attention + x)
-        x = self.drops(x)
-        fc_embed = self.fc(x)
-        x = self.normal_2(fc_embed + x)
-        x = self.drops(x)
-        return x
-
-class Transformer(nn.Module):
-    """
-        a transformer 
-        made for generating a set of texts
-            - almost an exact copy from the tutorial by
-              Peter Bloem
-    """
-    def __init__(self, emb_size, heads, depth,
-                 seq_length, num_tokens, 
-                 bottleneck=50,
-                 hidden=None,
-                 no_embedding=False):
-        super().__init__()
-
-        self.num_tokens = num_tokens
-        self.token_embed = nn.Embedding(embedding_dim=emb_size,
-                                        num_embeddings=num_tokens)
-        self.pos_embedding = nn.Embedding(embedding_dim=emb_size,
-                                          num_embeddings=num_tokens)
-        self.no_embedding = no_embedding
-        transformer_blocks = []
-        for i in range(depth):
-            transformer_blocks.append(
-                    T_block(embed=emb_size, 
-                            sequence_len=seq_length,
-                            head=heads,hidden=hidden))
-        self.transformer_blocks = nn.Sequential(*transformer_blocks)
-        self.to_outputs = nn.Linear(emb_size, num_tokens)
-    def forward(self, x, hid=None):
-        if self.no_embedding:
-            tokens=x
-        else:
-            tokens = self.token_embed(x)
-        batches, width, breadth = tokens.size()
-        a = torch.arange(breadth, device=device_assigner())
-        
-        positions = self.pos_embedding(
-                            torch.arange(
-                                width,
-                                device=device_assigner()))
-        positions = positions.expand(batches, width, breadth)
-        x = tokens + positions
-        x = self.transformer_blocks(x)
-        x = x.view(batches * width, breadth)
-        x = self.to_outputs(x).view(batches, width, self.num_tokens)
-        x = F.log_softmax(x, dim=2)
-        return x,hid
-
+            tokens = self.emb_token(k).type(torch.FloatTensor)
+        positions = self.emb_pos(
+                        torch.arange(
+                            k.size()[-1],
+                            device=device_assigner()))
+        positions = positions.transpose(
+                0,1).expand(k.size()).type(torch.FloatTensor)
+        positions = positions.to(device_assigner())
+        k = k + positions
+        output = self.att(q,k,v)
+        output = self.dense_layer(output)
+        output = output.view(output.size()[0],1,-1,output.size()[2])
+        output = F.log_softmax(output,dim=2)
+        return output
