@@ -104,5 +104,7 @@ class cross_attention(nn.Module):
         x, y = self.corel_map(x,y)
         x, y = self.int_dense(x,y)
         x = torch.mul(x,x1)
+        x_mean = abs(torch.mean(x).item())
+        x=x/(x_mean+0.0001)
         y = torch.mul(y,y1)
         return x, y

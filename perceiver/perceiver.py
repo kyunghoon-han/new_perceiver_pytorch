@@ -12,13 +12,13 @@ class perceiver(nn.Module):
                  num_tokens,
                  sequence_length,
                  batch_size,
-                 output_size,
+                 #output_size,
                  dropout=0.1,
                  intermediate_channels=10,
-                 bottleneck=128,
-                 depth=10,
+                 bottleneck=32,
+                 depth=7,
                  correlation_depth=2,
-                 num_heads=10,
+                 num_heads=8,
                  no_embedding=True):
         super().__init__()
         # so this is the latent tensor
@@ -50,8 +50,24 @@ class perceiver(nn.Module):
         half_seqlen = int(sequence_length/2)
         self.linear_1 = nn.Linear(bottleneck, half_seqlen)
         self.linear_2 = nn.Linear(bottleneck, half_seqlen)
-        self.final = nn.Linear(half_seqlen*half_seqlen,output_size)
-    def forward(self, x): # for now, keep the key and value the same
+        self.final = nn.Linear(half_seqlen*half_seqlen,num_tokens)
+        self.bs=bottleneck
+
+    def forward(self, x, q=None): # for now, keep the key and value the same
+        #q=(batch,last_output,bs,bs)
+        if q!=None :
+            q = torch.argmax(q, -1).type(torch.float32)
+            q = torch.unsqueeze(q, -1)
+            q = torch.unsqueeze(q, -1)
+            q = torch.repeat_interleave(q, self.bs, -1)
+            q = torch.unsqueeze(q,-1)
+            q = torch.repeat_interleave(q, self.bs, -1)
+
+            self.query_tensor=q
+        
+        self.latent_tensor=torch.ones(
+                        64,1,
+                        self.bs,self.bs).to(device_assigner())
         for i in range(self.depth):
             self.latent_tensor, self.query_tensor = self.ca(
                     self.latent_tensor,self.query_tensor)
