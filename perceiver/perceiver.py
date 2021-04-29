@@ -21,14 +21,6 @@ class perceiver(nn.Module):
                  num_heads=20,
                  no_embedding=True):
         super().__init__()
-        # so this is the latent tensor
-        self.latent_tensor=torch.rand(
-                        batch_size,1,
-                        bottleneck,bottleneck).to(device_assigner())
-        # this is the query
-        self.query_tensor=torch.rand(
-                        batch_size,1,
-                        bottleneck,bottleneck).to(device_assigner())
         # cross-attention block
         self.ca = ca(size_features=bottleneck,
                      channels=intermediate_channels,
@@ -53,21 +45,16 @@ class perceiver(nn.Module):
         self.final = nn.Linear(half_seqlen*half_seqlen,sequence_length*num_tokens)
         self.bs=bottleneck
         self.embedding = nn.Embedding(num_tokens,embedding_size)
-    def forward(self, x): # for now, keep the key and value the same
+    def forward(self, x,latent_tensor): # for now, keep the key and value the same
         #q=(batch,last_output,bs,bs)
-        self.query_tensor=torch.ones(
-                        64,1,
-                        self.bs,self.bs).to(device_assigner())
-        self.latent_tensor=torch.ones(
-                        64,1,
-                        self.bs,self.bs).to(device_assigner())
+        query_tensor = latent_tensor.clone()
 
         for i in range(self.depth):
-            self.latent_tensor, self.query_tensor = self.ca(
-                    self.latent_tensor,self.query_tensor)
-            self.query_tensor = self.tb(
-                    self.query_tensor, x, x)
-        output = self.rels(self.dropout(self.linear_1(self.query_tensor)))
+            latent_tensor, query_tensor = self.ca(
+                    latent_tensor, query_tensor)
+            query_tensor = self.tb(
+                    query_tensor, x, x)
+        output = self.rels(self.dropout(self.linear_1(query_tensor)))
         output = output.view(-1, output.size()[-1],output.size()[-2])
         output = self.rels(self.dropout(self.linear_2(output)))
         output = output.view(output.size()[0],-1)
