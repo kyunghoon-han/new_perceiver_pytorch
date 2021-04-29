@@ -74,12 +74,7 @@ class attention_block(nn.Module):
         qk = F.softmax(qk, dim=-1)
 
         # attention
-        #print(qk.size())
-        #print(v.size())
         att_output = torch.matmul(qk, v)
-        #print(att_output.size())
-        #print(self.q * self.heads)
-        #exit()
         return self.final_layer(att_output)
 
 class transformer_block(nn.Module):
@@ -106,18 +101,23 @@ class transformer_block(nn.Module):
         self.q = query_size
         self.s = sequence_length
     def forward(self, q,k,v):
-        if self.no_emb:
-            tokens = k.type(torch.FloatTensor)
-        else:
-            tokens = self.emb_token(k).type(torch.FloatTensor)
+
+        k = self.emb_token(k).type(torch.FloatTensor)
+        v = self.emb_token(v).type(torch.FloatTensor)
+        q = self.emb_token(q).type(torch.FloatTensor)
+
         positions = self.emb_pos(
                         torch.arange(
-                            k.size()[-1],
+                            k.size(-1),
                             device=device_assigner()))
+
         positions = positions.transpose(
                 0,1).expand(k.size()).type(torch.FloatTensor)
+
         positions = positions.to(device_assigner())
+
         k = k + positions
+
         output = self.att(q,k,v)
         output = self.dense_layer(output)
         output = output.view(output.size()[0],1,-1,output.size()[2])
