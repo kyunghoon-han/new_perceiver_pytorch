@@ -15,7 +15,7 @@ The following modules of this file may be of use:
 
 ## perceiver.py
 
-
+The main perceiver module.
 
 ## Things to be updated
 1. The model crashes when nn.DataParallel is employed
