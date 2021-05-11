@@ -19,9 +19,6 @@ The following modules of this file may be of use:
 
 The main perceiver module. 
 
-## Things to remember
+## Remarks
 1. Note that it is highly recommended to use the LAMB optimizer for the training.
 2. To save some memory issues, the model is designed to take the latent tensor input from the outside of the model.
-
-## Things to be updated
-1. incorporate key and value information to the cross attention module.
