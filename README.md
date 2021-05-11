@@ -2,7 +2,7 @@
 
 The transformer unit is a slight modification of the template given by Peter Bloem in his [transformer tutorial](http://peterbloem.nl/blog/transformers). One may change the internal structure on one's own will. It would be a great honour if (s)he shares h(er/is) modification of my code. This model is rather different from the original perceiver model as its cross-attention sections only takes queries and latent tensors where the key and the value tensors are input directly to the transformer blocks with its queries as the output of the cross-attention module.
 The model diagram is as follows:
-![](https://github.com/kyunghoon-han/perceiver_pytorch/blob/main/model_diagram.jpg?raw=true)
+![model](https://github.com/kyunghoon-han/perceiver_pytorch/blob/main/model_diagram.png?raw=true)
 
 ## cross_attention.py
 
